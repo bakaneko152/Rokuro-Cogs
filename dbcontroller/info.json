@@ -1,0 +1,30 @@
+{
+    "author" : [
+        "bakaneko"
+    ],
+    "description" : "データベースとのやり取り",
+    "disabled" : false,
+    "end_user_data_statement" : "使う側によってなのでしらない.",
+    "hidden" : false,
+    "install_msg" : "これだけじゃ何もできないので他のcogもインストして",
+    "max_bot_version" : "0.0.0",
+    "min_bot_version" : "3.1.8",
+    "min_python_version" : [
+        3,
+        7,
+        2
+    ],
+    "name" : "DBController",
+    "permissions" : [],
+    "required_cogs" : {},
+    "requirements" : [
+        "sqlalchemy",
+        "aiomysql"
+    ],
+    "short" : "Cog for DB",
+    "tags" : [
+        "Database",
+        "DB"
+    ],
+    "type" : "COG"
+}
