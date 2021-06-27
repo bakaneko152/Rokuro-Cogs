@@ -6,6 +6,7 @@ from redbot.core import Config, checks, commands, modlog, errors
 from redbot.core.i18n import Translator, cog_i18n
 from redbot.core.utils.chat_formatting import humanize_list
 
+from hyperlog.query_builder import create_tables
 from .eventmixin import CommandPrivs, EventChooser, EventMixin
 from .settings import inv_settings
 
@@ -33,7 +34,7 @@ class HyperLog(EventMixin, commands.Cog):
         self.settings = {}
         self._ban_cache = {}
         try:
-            self.bot.get_cog("DBController")
+            self.db=self.bot.get_cog("DBController")
         except errors.CogLoadError:
             raise errors.CogLoadError("HyperLog is need for DBController")
         self.loop = bot.loop.create_task(self.invite_links_loop())
@@ -77,8 +78,12 @@ class HyperLog(EventMixin, commands.Cog):
                 logger.info("Saving all guild data to new version type")
                 await self.config.guild(guild).set(all_data[guild_id])
                 await self.config.version.set("2.8.5")
-
+        
+        query_list=create_tables()
         self.settings = all_data
+        for query in query_list:
+            await self.db.execute(query)
+        await self.db.commit()
 
     async def hyperlog_settings(self, ctx: commands.Context) -> None:
         guild = ctx.message.guild

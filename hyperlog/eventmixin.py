@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import json
 import logging
 from typing import Sequence, Union, cast, Optional, Tuple, Dict, List, Any
 
@@ -16,6 +17,9 @@ from redbot.core.utils.chat_formatting import (
     humanize_timedelta,
     pagify,
 )
+
+from dbcontroller import DBController
+from hyperlog import query_builder
 
 _ = i18n.Translator("HyperLog", __file__)
 logger = logging.getLogger("red.rokuro-cogs.HyperLog")
@@ -85,6 +89,7 @@ class EventMixin:
     bot: Red
     settings: Dict[int, Any]
     _ban_cache: Dict[int, List[int]]
+    db: DBController
     async def get_event_colour(
         self, guild: discord.Guild, event_type: str, changed_object: Optional[discord.Role] = None
     ) -> discord.Colour:
@@ -313,7 +318,7 @@ class EventMixin:
                 "{emoji} `{time}` **{author}** (`{a_id}`) posted a message "
                 "in {channel}.\n{message}\n}"
             ).format(
-                emoji=self.settings[guild.id]["message_edit"]["emoji"],
+                emoji=self.settings[guild.id]["message_post"]["emoji"],
                 time=time.strftime(fmt),
                 author=message.author,
                 a_id=message.author.id,
@@ -321,6 +326,10 @@ class EventMixin:
                 message=escape(message.content, mass_mentions=True),
             )
             await channel.send(msg[:2000])
+        #memo:db
+        await self.db.execute(query_builder.insert_message_sql(),query_builder.message_values(message))
+        await self.db.execute(query_builder.insert_message_history_sql(), query_builder.message_values(message)+{"change_code":0})
+        await self.db.commit()
 
     @commands.Cog.listener(name="on_raw_message_delete")
     async def on_raw_message_delete_listener(
@@ -399,13 +408,17 @@ class EventMixin:
         )
         time = message.created_at
         perp = None
+        perp_dict=None
         if channel.permissions_for(guild.me).view_audit_log and check_audit_log:
             action = discord.AuditLogAction.message_delete
             async for log in guild.audit_logs(limit=2, action=action):
                 same_chan = log.extra.channel.id == message.channel.id
                 if log.target.id == message.author.id and same_chan:
                     perp = f"{log.user}({log.user.id})"
+                    perp_dict={"perp_user":str(log.user),"perp_userid":log.user.id,"self_delete":False}
                     break
+        if perp_dict is None:
+            perp_dict = {"perp_user": str(message.author), "perp_userid":message.author.id,"self_delete":True}
         message_channel = cast(discord.TextChannel, message.channel)
         author = message.author
         if perp is None:
@@ -457,6 +470,25 @@ class EventMixin:
                 : (1990 - len(infomessage))
             ]
             await channel.send(f"{infomessage}\n>>> {clean_msg}")
+            
+        #memo:db
+        result=await self.db.execute("SELECT * FROM messages WHERE messages.guild_id = %(guild_id)s AND messages.channel_id = %(channel_id)s AND messages.message_id=%(message_id)s;",query_builder.message_values(message),method="fetchone")
+        post_ver=1
+        try:
+            result=result[0]
+        except:
+            result=None
+        if result is None:
+            await self.db.execute(query_builder.insert_message_sql(), query_builder.message_values(message))
+            await self.db.execute(query_builder.insert_message_history_sql(), query_builder.message_values(message) + {"change_code": 0})
+            await self.db.commit()
+            result=query_builder.message_values(message)
+            post_ver=2
+        else:
+            post_ver=result["ver"]+1
+        await self.db.execute(query_builder.update_message_sql(),query_builder.message_values(message,True,post_ver,json.dumps(perp_dict,ensure_ascii=False)))
+        await self.db.execute(query_builder.insert_message_history_sql(), query_builder.history_message_values(result,message,True,ver=post_ver,other_data=json.dumps(perp_dict,ensure_ascii=False)))
+        await self.db.commit()
 
     @commands.Cog.listener()
     async def on_raw_bulk_message_delete(self, payload: discord.RawBulkMessageDeleteEvent):
@@ -507,7 +539,9 @@ class EventMixin:
                 channel=message_channel.mention,
             )
             await channel.send(infomessage)
+        #memo:これがonになっていないと一括削除したとき飛ばない?
         if settings["bulk_individual"]:
+            #memo:cacheされてない場合はなにもされない
             for message in payload.cached_messages:
                 new_payload = discord.RawMessageDeleteEvent(
                     {"id": message.id, "channel_id": channel_id, "guild_id": guild_id}
@@ -1346,6 +1380,24 @@ class EventMixin:
                 after=escape(after.content, mass_mentions=True),
             )
             await channel.send(msg[:2000])
+            
+        #memo:db
+        result=await self.db.execute("SELECT * FROM messages WHERE messages.guild_id = %(guild_id)s AND messages.channel_id = %(channel_id)s AND messages.message_id=%(message_id)s;",query_builder.message_values(before),method="fetchone")
+        post_ver=1
+        try:
+            result=result[0]
+        except:
+            result=None
+        if result is None:
+            await self.db.execute(query_builder.insert_message_sql(), query_builder.message_values(before))
+            await self.db.execute(query_builder.insert_message_history_sql(), query_builder.message_values(before) + {"change_code": 0})
+            await self.db.commit()
+            post_ver=2
+        else:
+            post_ver=result["ver"]+1
+        await self.db.execute(query_builder.update_message_sql(),query_builder.message_values(after,False,post_ver))
+        await self.db.execute(query_builder.insert_message_history_sql(), query_builder.history_message_values(before,after,False,ver=post_ver))
+        await self.db.commit()
 
     @commands.Cog.listener()
     async def on_guild_update(self, before: discord.Guild, after: discord.Guild) -> None:

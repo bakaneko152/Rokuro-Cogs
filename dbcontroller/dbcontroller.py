@@ -183,7 +183,7 @@ class DBController(commands.Cog):
         
 
             
-    async def _execute(self, query: str, *args, method: Optional[Callable] = None) -> Any:
+    async def execute(self, query: str, *args, method: Optional[Callable] = None) -> Any:
         async with self._pool.acquire() as conn:
             async with conn.cursor() as cur:
                 # if method is None:
@@ -201,5 +201,8 @@ class DBController(commands.Cog):
                 elif method=="set":
                     await conn.commit()
                     return 1
-
+    async def commit(self) -> Any:
+        async with self._pool.acquire() as conn:
+                await conn.commit()
+                return 1
 
